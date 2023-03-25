@@ -1,0 +1,64 @@
+  <article class="course${mode_class}" aria-labelledby="course-title-${enrollment.course_id}" id="course-card-${course_card_index}" >
+    <section class="details row" aria-labelledby="details-heading-${enrollment.course_id}" style="height: 225px;">
+          <h2 class="hd hd-2 sr" id="details-heading-${enrollment.course_id}">${_('Course details')}</h2>
+        <div class="wrapper-course-image col-2 h-25"  aria-hidden="true">
+          <span class="cover ${entityName}_card" style="">
+            <img src="${course_overview.image_urls['small']}" class="course-image" alt=" " onerror="this.parentNode.removeChild(this)"  style="width: 100%; height: 100%; border-radius: 10px;"/>
+          </span>
+        </div>
+        <div class="col">
+          <div class="col-12">
+            <span class="row">
+              <h3 class="course-title text-black" id="course-title-${enrollment.course_id}">
+                <div class="course-title " style="height: 30px;">${course_overview.display_name_with_default}</div>
+              </h3>
+            </span>
+            <span class="row mt-3">
+              %if course_overview.course_custom_details is not None:
+               <div class="course-title fs-5 text-secondary" style="height: 30px;">${course_overview.course_custom_details.FocusArea}</div>
+              %else:
+               <div class="course-title fs-5 text-secondary" style="height: 30px;">${'C++'}</div>
+              %endif
+            </span>
+            <span class="row mt-3">
+              <div class="course-date fs-5 text-secondary"><i class="fa fa-calendar mr-2" aria-hidden="true"></i>
+                % if course_overview.start is not None:
+                ${course_overview.start.astimezone(localtz).strftime('%d %B %Y')}
+                % endif
+                % if course_overview.end is not None:
+                - ${course_overview.end.astimezone(localtz).strftime('%d %B %Y')}
+                % endif
+              </div>
+            </span>
+            <span class="row mt-3">
+              <div class="course-duration fs-5 text-secondary">
+                %if course_overview.course_custom_details is not None: 
+                  <i class="fa fa-clock-o" aria-hidden="true">
+                    &nbsp; ${course_overview.course_custom_details.Duration} Min(s)
+                  </i>
+                %else:
+                  <i class="fa fa-clock-o" aria-hidden="true">
+                    &nbsp; ${'60'} Min(s)
+                  </i>
+                %endif  
+              </div>
+            </span>
+          </div>
+        </div>
+      </div>
+      <div class="wrapper-course-details ">
+        <h3 class="course-title" id="course-title-${enrollment.course_id}">
+          
+              <div class="col-lg-12 course-category" 
+              <div class="row">
+                
+                <div class="course-category col-md-6">
+                 
+                </div>
+              </div>
+
+
+              
+        </h3>
+    </section>
+  </article>
