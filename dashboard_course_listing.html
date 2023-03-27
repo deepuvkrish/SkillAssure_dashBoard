@@ -1,0 +1,170 @@
+<%page args="course_overview, enrollment, entitlement, entitlement_session, 
+course_card_index, is_unfulfilled_entitlement, is_fulfilled_entitlement, 
+entitlement_available_sessions, entitlement_expiration_date, entitlement_expired_at, 
+show_courseware_link, cert_status, can_refund_entitlement, can_unenroll, credit_status, 
+show_email_settings, course_mode_info, is_paid_course, verification_status, 
+course_requirements, dashboard_index, share_settings, related_programs, display_course_modes_on_dashboard, 
+show_consent_link, enterprise_customer_name, resume_button_url, entityName" expression_filter="h"/>
+
+<%!
+from datetime import datetime
+import urllib
+import pytz
+
+from pytz import timezone
+from dateutil import tz
+
+from django.utils.translation import ugettext as _
+from django.utils.translation import ungettext
+from django.urls import reverse
+from common.djangoapps.course_modes.models import CourseMode
+from common.djangoapps.course_modes.helpers import enrollment_mode_display
+from openedx.core.djangolib.js_utils import dump_js_escaped_json, js_escaped_string
+from openedx.core.djangolib.markup import HTML, Text
+from openedx.features.course_experience_assess import course_home_url_name
+from openedx.features.course_experience import course_home_url
+from common.djangoapps.student.helpers import (
+  VERIFY_STATUS_NEED_TO_VERIFY,
+  VERIFY_STATUS_SUBMITTED,
+  VERIFY_STATUS_RESUBMITTED,
+  VERIFY_STATUS_APPROVED,
+  VERIFY_STATUS_MISSED_DEADLINE,
+  VERIFY_STATUS_NEED_TO_REVERIFY,
+  DISABLE_UNENROLL_CERT_STATES,
+)
+from common.djangoapps.util.course import get_link_for_about_page, get_encoded_course_sharing_utm_params
+%>
+
+<%
+  reverify_link = reverse('verify_student_reverify')
+  cert_name_short = course_overview.cert_name_short
+  if cert_name_short == "":
+    cert_name_short = settings.CERT_NAME_SHORT
+
+  cert_name_long = course_overview.cert_name_long
+  if cert_name_long == "":
+    cert_name_long = settings.CERT_NAME_LONG
+  billing_email = settings.PAYMENT_SUPPORT_EMAIL
+
+  is_course_expired = hasattr(show_courseware_link, 'error_code') and show_courseware_link.error_code == 'audit_expired'
+  
+  localtz=tz.gettz('Asia/Kolkata')
+  current_time = datetime.now().replace(tzinfo=pytz.UTC).astimezone(localtz)
+
+  assessment_status_openAssessment = True
+  assessment_status_text = 'ACTIVE'
+  assessment_status_class='active_assessment'
+  assessment_status_message=''
+  if course_overview.end is not None and course_overview.end.astimezone(localtz) < current_time:
+    assessment_status_text = 'EXPIRED'
+    assessment_status_class='expired_assessment'
+    assessment_status_openAssessment = False
+    assessment_status_message = 'You are late! The last date to take this '+entityName+' was '+course_overview.end.astimezone(localtz).strftime('%d %B %Y')
+  elif course_overview.start is not None and course_overview.start.astimezone(localtz) > current_time:
+    assessment_status_text = 'SCHEDULED'
+    assessment_status_class='future_assessment'
+    assessment_status_openAssessment = False
+    assessment_status_message = 'You are early! This '+entityName+' starts on '+course_overview.start.astimezone(localtz).strftime('%d %B %Y')
+%>
+
+<%namespace name='static' file='../static_content.html'/>
+
+<div class="card shadow course-item col-xl-4 col-md-6" style="min-width:25rem;">
+  % if display_course_modes_on_dashboard:
+    <%
+        course_verified_certs = enrollment_mode_display(
+            enrollment.mode,
+            verification_status.get('status'),
+            course_overview.id
+        )
+    %>
+    <%
+        mode_class = course_verified_certs.get('display_mode', '')
+        if mode_class:
+            mode_class = ' ' + mode_class ;
+    %>
+  % else:
+    <% mode_class = '' %>
+  % endif
+      <div class="course-container"
+        % if getattr(course_overview, 'language'):
+          lang="${course_overview.language}"
+        % endif
+      >
+      <% course_target = course_home_url(course_overview.id) %>
+        <a 
+        % if assessment_status_openAssessment:
+        href="${course_target}" 
+        style="color:black;text-decoration:none;"
+        % else :
+        class="inactive_assessment"
+        style="color:black;important;cursor:pointer;text-decoration:none;" 
+        data-warning="${assessment_status_message}"
+        % endif
+       
+        >
+        
+          
+            <div class="card-body ourse${mode_class}"  aria-labelledby="course-title-${enrollment.course_id}" id="course-card-${course_card_index}" style="margin-right:20px;height: 180px;">
+                <div class="card-body-header" style="display:flex;flex-direction:row;">
+                    <div class="col-1 cover ${entityName}_card">
+                        <img src="${course_overview.image_urls['small']}" class="course-image" alt=" " onerror="this.parentNode.removeChild(this)"  style="width: 100%; height: 100%; border-radius: 10px; object-fit:contain"/>
+                    </div>
+                    <div class="col-11 card-body-heading" style="display:flex;justify-content:space-between;margin-left:10px;">
+                        <span class="program_name" id="course-title-${enrollment.course_id}" style="font-weight:bolder">
+                          ${course_overview.display_name_with_default}
+                        </span>
+                        <img src="https://www.kindpng.com/picc/m/79-796590_fa-chevron-right-png-transparent-png.png" style="width:10px">
+                    </div>
+
+                </div>
+                <div class="card-body-content" style="margin-left:40px">
+                    <span>
+                        %if course_overview.course_custom_details is not None:
+                        <span class="card-body-focusarea-title" >${course_overview.course_custom_details.FocusArea}</span>
+                        %else:
+                        <span class="card-body-focusarea-title" >${'C++'}</span>
+                        %endif
+                      
+                    </span>
+                    <!-- <div class="progress_bar">
+                        <div id="myBar"></div>
+                        <span class="progress_info">
+                            <span class="progress_percent">
+                                56%
+                            </span>
+                            you have Completed this course
+                        </span>
+                    </div> -->
+
+                    <div class="date_time" style="margin-top: 10px;margin-bottom: 10px;">
+                      <div class="course-date"><i class="fa fa-calendar mr-2" aria-hidden="true"></i>
+                      
+                        <span class="dates" style="font-weight: 900;color: #475467;font-size: 12px;">
+                          % if course_overview.start is not None:
+                          ${course_overview.start.astimezone(localtz).strftime('%d %B %Y')}
+                          % endif
+                          % if course_overview.end is not None:
+                          - ${course_overview.end.astimezone(localtz).strftime('%d %B %Y')}
+                          % endif
+                        </span>
+                      </div>
+                    </div>
+
+                    <div class="date_time" style="margin-top: 10px;margin-bottom: 10px;">
+                      <i class="fa fa-clock-o" aria-hidden="true"></i>
+                        <span class="dates" style="font-weight: 900;color: #475467;font-size: 12px;">
+                          %if course_overview.course_custom_details is not None: 
+                            &nbsp; ${course_overview.course_custom_details.Duration} Min(s)
+                        %else:
+                            &nbsp; ${'60'} Min(s)
+                        %endif 
+                        </span>
+                    </div>
+                </div>
+            </div>
+    
+        </a>
+    </div>
+  </div>
+
