@@ -1,0 +1,134 @@
+## mako
+
+<%page expression_filter="h" args="online_help_token"/>
+
+<%namespace name='static' file='../static_content.html'/>
+<%namespace file='../main.html' import="login_query"/>
+<%!
+from django.urls import reverse
+from django.utils.translation import ugettext as _
+from openedx.core.djangoapps.site_configuration import helpers as configuration_helpers
+%>
+
+<%
+  show_explore_courses = settings.FEATURES.get('COURSES_ARE_BROWSABLE') and not show_program_listing
+  show_sysadmin_dashboard = settings.FEATURES.get('ENABLE_SYSADMIN_DASHBOARD','') and user.is_staff
+  self.real_user = getattr(user, 'real_user', user)
+
+  support_link = configuration_helpers.get_value('SUPPORT_SITE_LINK', settings.SUPPORT_SITE_LINK)
+  doc_link = get_online_help_info(online_help_token)['doc_url']
+
+  if online_help_token == "instructor":
+    help_link = doc_link
+  elif support_link:
+    help_link = support_link
+  else:
+    help_link = doc_link
+%>
+% if settings.FEATURES.get('ENABLE_DASHBOARD_SEARCH'):
+  <%static:require_module module_name="course_search/js/dashboard_search_factory" class_name="DashboardSearchFactory">
+      DashboardSearchFactory();
+  </%static:require_module>
+% endif
+<style>
+  button#search-search-box, button#clear-search-box, 
+  button#search-search-box:hover, button#clear-search-box:hover,
+  button#search-search-box:focus, button#clear-search-box:focus
+  {
+    height: 22px;
+    line-height: unset;
+    background: white;
+    padding: 0 10px;
+    margin: 4px 0px;
+    position: absolute;
+    right: 1px;
+    top: 0;
+    box-sizing: border-box;
+    display: block;
+    overflow: visible;
+    border-radius: 0px;
+    box-shadow: none;
+    text-transform: none;
+    border: none;
+    color:#0075b4;
+    cursor: pointer;
+    border-left: 1px solid lightgray;
+    outline: 0;
+  }
+  #dashboard-search-input:focus{
+    width: 400px;
+  }
+  #dashboard-search-input, #dashboard-search-input:focus{
+    height: 30px;
+    background: white;
+    box-shadow: 0 1px 0 0 #fff, inset 0 0 3px 0 rgba(0,0,0,0.05);
+    box-sizing: border-box;
+    top: 5px;
+    border-radius: 5px;
+    border: 1px solid #c8c8c8;
+    outline: 0;
+    padding: 16px;
+    min-width: 250px;
+    font-size: 14px;
+  }
+  .secondary .nav-item{
+    float: right;
+  }
+</style>
+<div class="nav-links">
+  <div class="main">
+    % if False and show_dashboard_tabs:
+      <div class="mobile-nav-item hidden-mobile nav-item nav-tab">
+        <a class="${'active ' if reverse('dashboard') == request.path else ''}tab-nav-link" href="${reverse('dashboard')}"
+             aria-current="${'page' if reverse('dashboard') == request.path else 'false'}" style="color: black;">
+             ${_("Courses")}
+        </a>
+      </div>
+      % if show_program_listing:
+        <div class="mobile-nav-item hidden-mobile nav-item nav-tab">
+          <a class="${'active ' if reverse('program_listing_view') in request.path else ''}tab-nav-link" href="${reverse('program_listing_view')}"
+             aria-current="${'page' if reverse('program_listing_view') == request.path else 'false'}">
+             ${_("Programs")}
+          </a>
+        </div>
+      % endif
+    % endif
+    % if show_explore_courses:
+      <div class="mobile-nav-item hidden-mobile nav-item nav-tab" style="color: black;">
+          <a class="tab-nav-link" href="${marketing_link('COURSES')}"
+          style="color: black;"
+             aria-current="${'page' if '/courses' in request.path else 'false'}">
+             ${_('Explore New Courses')}
+          </a>
+      </div>
+    % endif
+    % if show_sysadmin_dashboard:
+      <div class="mobile-nav-item hidden-mobile nav-item nav-tab">
+        ## Translators: This is short for "System administration".
+        <a class="tab-nav-link" href="${reverse('sysadmin')}">${_("Sysadmin")}</a>
+      </div>
+    % endif
+    
+  </div>
+  <div class="secondary">
+    <%include file="user_dropdown.html"/>
+    % if not settings.FEATURES.get('ENABLE_SEARCH'):
+      <div class="nav-item nav-tab">
+        <div id="dashboard-search-bar" class="search-bar dashboard-search-bar" role="search" aria-label="Dashboard" style="margin: 0px;">
+          <form class="search-form">
+            <!-- <label for="dashboard-search-input">${_('Search Your Courses')}</label> -->
+            <div class="search-field-wrapper" style="position: relative;">
+              <input id="dashboard-search-input" type="text" class="search-field" placeholder="Search"/>
+              <button id="search-search-box" type="submit" class="search-button" title="${_('Search')}">
+                <span class="icon fa fa-search" aria-hidden="true"></span>
+              </button>
+              <button id="clear-search-box" type="button" class="cancel-button" title="${_('Clear search')}" style="display: none;">
+                <span class="icon fa fa-remove" aria-hidden="true"></span>
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    % endif
+  </div>
+</div>
