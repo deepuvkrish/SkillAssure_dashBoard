@@ -1,3 +1,7 @@
+<link rel="stylesheet" type="text/css" href="/static/slick-carousel/1.9.0/slick.min.css">
+<link rel="stylesheet" type="text/css" href="/static/font-awesome/4.7.0/css/font-awesome.min.css">
+<script src="/static/jquery/jquery-3.3.1.min.js"></script>
+<script src="/static/slick-carousel/1.9.0/slick.min.js"></script>
 <%page expression_filter="h"/>
 <%inherit file="main.html" />
 <%def name="online_help_token()"><% return "learnerdashboard" %></%def>
@@ -29,10 +33,6 @@ from common.djangoapps.student.models import CourseEnrollment
 
 <%block name="pagetitle">${_("Dashboard")}</%block>
 <%block name="bodyclass">view-dashboard is-authenticated</%block>
-<head>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-GLhlTQ8iRABdZLl6O3oVMWSktQOp6b7In1Zl3/Jr59b6EGGoI1aFkw7cmDA6j6gD" crossorigin="anonymous">
-  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/js/bootstrap.bundle.min.js" integrity="sha384-JEW9xMcG8R+pH31jmWH6WWP0WintQrMb4s7ZOdauHnUtxwoG2vI5DkLtS3qm9Ekf" crossorigin="anonymous"></script>
-</head>
 
 <%block name="header_extras">
 % for template_name in ["donation"]:
@@ -148,12 +148,27 @@ from common.djangoapps.student.models import CourseEnrollment
     %endif
 
 </div>
+<style>
+.slick-track{
+  float:left;
+}
+</style>
+<main id="main" aria-label="Content" tabindex="-1" style="font-family: Inter;">
 
+<<<<<<< HEAD
 <main id="main" aria-label="Content" tabindex="-1">
     <div class="dashboard row justify-content-center" id="dashboard-main" style="font-family: Inter;">
       <h4 style="margin-left:220px">Prepare</h4>
       <hr>
       <div class="col-xl-10">
+=======
+    <div class="dashboard-title w-100 mt-3 mx-0 border-bottom border-2 py-2 px-xl-4 bg-light">
+      <h2 class="fw-bold mx-xl-5">Prepare</h2>
+    </div>
+    
+    <div class="dashboard row justify-content-center" id="dashboard-main" >
+      <div class="col-xl-11 mt-5">
+>>>>>>> fbd10ea5e9c9e9551d1781cebccc51b014a094a1
           % if display_dashboard_courses:
 
             <div class="row">
