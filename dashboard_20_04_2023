@@ -1,0 +1,910 @@
+<link rel="stylesheet" type="text/css" href="/static/slick-carousel/1.9.0/slick.min.css">
+<link rel="stylesheet" type="text/css" href="/static/font-awesome/4.7.0/css/font-awesome.min.css">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-KK94CHFLLe+nY2dmCWGMq91rCGa5gtU4mk92HdvYe+M/SXH301p5ILy+dN9+nJOZ" crossorigin="anonymous">
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha3/dist/js/bootstrap.bundle.min.js" integrity="sha384-ENjdO4Dr2bkBIFxQpeoTz1HIcje39Wm4jDKdf19U8gI4ddQ3GYNS7NTKfAdVQSZe" crossorigin="anonymous"></script>
+<script src="/static/jquery/jquery-3.3.1.min.js"></script>
+<script src="/static/slick-carousel/1.9.0/slick.min.js"></script>
+<%page expression_filter="h"/>
+<%inherit file="main.html" />
+<%def name="online_help_token()"><% return "learnerdashboard" %></%def>
+<%namespace name='static' file='static_content.html'/>
+<%!
+import pytz
+import six
+from datetime import datetime, timedelta
+from django.urls import reverse
+from django.utils.translation import gettext as _
+from django.template import RequestContext
+from common.djangoapps.entitlements.models import CourseEntitlement
+from common.djangoapps.third_party_auth import pipeline
+from common.djangoapps.util.date_utils import strftime_localized
+from opaque_keys.edx.keys import CourseKey
+from openedx.core.djangoapps.content.course_overviews.models import CourseOverview
+from openedx.core.djangoapps.site_configuration import helpers as configuration_helpers
+from openedx.core.djangolib.js_utils import dump_js_escaped_json, js_escaped_string
+from openedx.core.djangolib.markup import HTML, Text
+
+from common.djangoapps.student.models import CourseEnrollment
+%>
+
+<%
+  cert_name_short = settings.CERT_NAME_SHORT
+  cert_name_long = settings.CERT_NAME_LONG
+%>
+
+
+<%block name="pagetitle">${_("Dashboard")}</%block>
+<%block name="bodyclass">view-dashboard is-authenticated</%block>
+
+<%block name="header_extras">
+% for template_name in ["donation"]:
+<script type="text/template" id="${template_name}-tpl">
+  <%static:include path="dashboard/${template_name}.underscore" />
+</script>
+% endfor
+</%block>
+
+<%block name="js_extra">
+  <script src="${static.url('js/commerce/credit.js')}"></script>
+  <script type="text/javascript" src="${static.url('js/learner_dashboard/certificate_api.js')}"></script>
+  <%static:js group='dashboard'/>
+  <script type="text/javascript">
+    $(document).ready(function() {
+      edx.dashboard.legacy.init({
+        dashboard: "${reverse('dashboard') | n, js_escaped_string}",
+        signInUser: "${reverse('signin_user') | n, js_escaped_string}",
+        changeEmailSettings: "${reverse('change_email_settings') | n, js_escaped_string}",
+        sendAccountActivationEmail: "${reverse('send_account_activation_email') | n, js_escaped_string}"
+
+      });
+    });
+  </script>
+  <%static:webpack entry="UnenrollmentFactory">
+    UnenrollmentFactory({
+      urls: {
+        dashboard: "${reverse('dashboard') | n, js_escaped_string}",
+        signInUser: "${reverse('signin_user') | n, js_escaped_string}",
+        changeEmailSettings: "${reverse('change_email_settings') | n, js_escaped_string}",
+        browseCourses: "${marketing_link('COURSES') | n, js_escaped_string}"
+      },
+      isEdx: false
+    });
+  </%static:webpack>
+  <%static:webpack entry="EntitlementUnenrollmentFactory">
+    ## Wait until the document is fully loaded before initializing the EntitlementUnenrollmentView
+    ## to ensure events are setup correctly.
+    $(document).ready(function() {
+      EntitlementUnenrollmentFactory({
+        dashboardPath: "${reverse('dashboard') | n, js_escaped_string}",
+        signInPath: "${reverse('signin_user') | n, js_escaped_string}",
+        browseCourses: "${marketing_link('COURSES') | n, js_escaped_string}",
+        isEdx: false
+      });
+    });
+  </%static:webpack>
+  % if settings.FEATURES.get('ENABLE_DASHBOARD_SEARCH'):
+    <%static:require_module module_name="course_search/js/dashboard_search_factory" class_name="DashboardSearchFactory">
+        DashboardSearchFactory();
+    </%static:require_module>
+  % endif
+  % if redirect_message:
+    <%static:require_module module_name="js/views/message_banner" class_name="MessageBannerView">
+        var banner = new MessageBannerView({urgency: 'low', type: 'warning'});
+        $('#content').prepend(banner.$el);
+        banner.showMessage(${redirect_message | n, dump_js_escaped_json})
+    </%static:require_module>
+  % endif
+  % if recovery_email_message:
+      <%static:require_module module_name="js/views/message_banner" class_name="MessageBannerView">
+        var banner = new MessageBannerView({urgency: 'low', type: 'warning', hideCloseBtn: false, isRecoveryEmailMsg: true});
+        $('#content').prepend(banner.$el);
+        banner.showMessage(${recovery_email_message | n, dump_js_escaped_json})
+      </%static:require_module>
+  % endif
+  % if recovery_email_activation_message:
+      <%static:require_module module_name="js/views/message_banner" class_name="MessageBannerView">
+        var banner = new MessageBannerView({urgency: 'low', type: 'warning', isRecoveryEmailMsg: true});
+        $('#content').prepend(banner.$el);
+        banner.showMessage(${recovery_email_activation_message | n, dump_js_escaped_json})
+      </%static:require_module>
+  % endif
+  % if enterprise_learner_portal_enabled_message:
+      <%static:require_module module_name="js/views/message_banner" class_name="MessageBannerView">
+        var banner = new MessageBannerView({urgency: 'low', type: 'warning', isLearnerPortalEnabled: true});
+        $('#content').prepend(banner.$el);
+        banner.showMessage(${enterprise_learner_portal_enabled_message | n, dump_js_escaped_json})
+      </%static:require_module>
+  % endif
+</%block>
+
+
+<div class="dashboard-notifications" tabindex="-1">
+
+    %if banner_account_activation_message:
+        <div class="dashboard-banner">
+            ${banner_account_activation_message | n, decode.utf8}
+        </div>
+    %endif
+
+    %if enrollment_message:
+        <div class="dashboard-banner">
+            ${enrollment_message | n,  decode.utf8}
+        </div>
+    %endif
+
+    %if enterprise_message:
+        <div class="dashboard-banner">
+            ${ enterprise_message | n, decode.utf8 }
+        </div>
+    %endif
+
+    %if account_activation_messages:
+      <div class="activation-message-container">
+        % for account_activation_message in account_activation_messages:
+          <div class="account-activation ${account_activation_message.tags}" role="alert" aria-label="Account Activation Message" tabindex="-1">
+            <div class="message-copy" >
+              ${ account_activation_message | n, decode.utf8 }
+            </div>
+          </div>
+        % endfor
+      </div>
+      %endif
+      
+</div>
+<style>
+    .slick-track{
+      float:left;
+    }
+
+    .over_cards{
+      display:flex;
+      flex-direction:row;
+      justify-content: space-evenly;
+    }
+   
+    .cont-body{
+      background-color: #FFFFFF;
+    }
+
+    .overall-card-title{
+      width: 94px;
+      height: 15px;
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 600;
+      font-size: 20px;
+      line-height: 24px;
+      color: #667085;
+    }
+    .overall_img{
+      filter: drop-shadow(-1px 0px 0px black);
+      width:30px;
+    }
+    .out_of{
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 600;
+      font-size: 10px;
+      color: #475467;
+    }
+    .percentage_area{
+      display:flex;
+      flex-direction:column;
+      font-weight:bold;
+      font-family:inter;
+      
+    }
+    .overall-card-marks{
+      font-family:inter;
+      font-size:15px;
+      font-weight:600;
+
+    }
+    .back_img{
+      align-items: center;
+      display: flex;
+    }
+    
+    .tech-logo{
+      display: grid;
+      
+    }
+    .comm-logo{
+      display: grid;
+      justify-items:end;
+      align-items: center;
+      
+    }
+    .tech-logo img{
+      width:50%;
+    }
+    .comm-logo img{
+      width:60%;
+    }
+    .grades{
+      padding:10px;
+    }
+    .grading{
+      display:flex;
+      flex-direction:row;
+      justify-content: space-around;
+    }
+    .grade_title{
+      font-family:inter;
+      font-weight:bold;
+      font-size:14px;
+      margin-bottom:8px;
+    }
+
+    .tech-details{
+      display:flex;
+      flex-direction:column;
+      justify-content: space-around;
+    }
+
+    .bands{
+      font-family:inter;
+      font-size:12px;
+    }
+    
+    
+    
+    .custom_navbar {
+      background: linear-gradient(45deg, #02407C, #0192D9);
+    }
+    
+    .overall-section {
+      padding-top: 20px;
+
+    }
+    
+    .overall {
+      display: flex;
+      flex-direction: row;
+    }
+    .overall-card{
+      min-width:200px;
+      padding-top:5px;
+      padding-bottom: 5px;
+      padding-left: 45px;
+      padding-right: 45px;
+      font-family:inter;
+      display: flex;
+      flex-direction: row;
+      flex-wrap: nowrap;
+      margin-top: 15px;
+      gap: 25px;
+      margin-bottom: 15px;
+    }
+
+    .cards {
+      box-shadow: 1px 1px 5px rgb(186, 186, 186);
+      background: white;
+      display: flex;
+      flex-direction: row;
+      font-family:inter;
+      font-family: inter;
+      border-radius: 5px;
+      padding-left: 10px;
+      padding-right: 0 !important;
+      padding-top: 10px;
+      padding-bottom: 10px;
+      margin-right: 10px;
+
+    }
+    .card-header{
+      margin-bottom:10px;
+    }
+
+    .card-content {
+      min-width: 75%;
+      text-align:start !important;
+    }
+
+    .card-img {
+      min-width: 25%;
+      display: flex;
+      align-items: center;
+      justify-content: end;
+    }
+
+    .grading-section {
+      padding-right: 10px;
+      padding-left: 10px;
+      padding-top: 30px;
+      display: flex;
+      flex-direction: column;
+      background: white;
+      border-radius: 10px;
+      margin-top: 59px;
+      box-shadow: 0px 4px 8px -2px rgba(16, 24, 40, 0.1), 0px 2px 4px -2px rgba(16, 24, 40, 0.06);
+    }
+    .divider{
+      background:#e8e5e5;
+      min-width:20px;
+      min-height: 5px;
+      margin-right: 10px;
+      margin-left: 10px;
+    }
+    .grades-card{
+      display:flex;
+      flex-direction:column;
+      margin-top:20px;
+    }
+    .tech-grade-card{
+      display:flex;
+      flex-direction:row;
+      margin-bottom:20px;
+    }
+    .band-card-tech{
+      background:linear-gradient(140.01deg, #6CE9A6 7.35%,rgba(18,146,78,0.94)100%);
+      color:white;
+      border-radius:15px;
+      padding:15px;
+      align-items:center;
+      justify-content:center;
+      width: 70px;
+      height: 70px;
+      display: flex;
+      flex-direction: row;
+    }
+    .band-card-comm{
+      background: linear-gradient(140.01deg, #E9C66C 7.35%, rgba(146, 118, 18, 0.94) 100%);
+      color:white;
+      border-radius:15px;
+      padding:15px;
+      align-items:center;
+      justify-content:center;
+      width: 70px;
+      height: 70px;
+      display: flex;
+      flex-direction: row;
+    }
+    .band_details{
+      display:flex;
+      flex-direction:column;
+      padding-left:20px;
+    }
+    .band-var{
+      font-family:inter;
+      font-weight:900;
+      font-size:36px;
+      line-height:24px;
+      text-shadow: 0px 3px 9px rgba(0, 0, 0, 0.17);
+    }
+    .scores{
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 600;
+      font-size: 12px;
+      line-height: 24px;
+      color: #475467;
+    }
+    .band-title{
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 600;
+      font-size: 16px;
+      line-height: 24px;
+      color: #1D2939;
+    }
+    .band_result{
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 600;
+      font-size: 14px;
+      line-height: 24px;
+      color: #344054;
+    }
+    .sidebar-title{
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 600;
+      font-size: 18px;
+      line-height: 22px;
+      leading-trim: both;
+      text-edge: cap;
+      color: #344054;
+    }
+    .skill-index-section{
+      padding-top:20px;
+    }
+    .skill-index-cards {
+      box-shadow: 1px 1px 5px rgb(186, 186, 186);
+      background: white;
+      display: flex;
+      flex-direction: row;
+      font-family:inter;
+      font-family: inter;
+      border-radius: 5px;
+      padding-left: 10px;
+      padding-right: 10px;
+      padding-top: 5px;
+      padding-bottom: 5px;
+
+    }
+    .skills-card{
+      display:flex;
+      flex-direction:column;
+      padding: 15px;
+    }
+    .skill-numerics{
+      display:flex;
+      flex-direction:row;
+      justify-content:space-around;
+    }
+    .skill-card-content{
+      display:flex;
+      flex-direction:column;
+      min-width:100%;
+    }
+    .marks-skill{
+      text-align:center;
+    }
+    .marks-skill-text{
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 500;
+      font-size: 22px;
+      line-height: 44px;
+      leading-trim: both;
+      text-edge: cap;
+      color: #344054;
+    }
+    .out-of-marks{
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 500;
+      font-size: 14px;
+      line-height: 44px;
+      leading-trim: both;
+      text-edge: cap;
+    }
+
+    .percentage-skill-text{
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 600;
+      font-size: 26px;
+      line-height: 44px;
+      leading-trim: both;
+      text-edge: cap;
+      color: #344054;
+    }
+    .comments{
+      display: flex;
+      justify-content: center;
+    }
+    .skill-comments{
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 600;
+      font-size: 12px;
+      line-height: 19px;
+      leading-trim: both;
+      text-edge: cap;
+      color: #475467;
+    }
+
+    .tech-stack-card{
+      border: 1px solid #D0D5DD;
+      border-radius: 10px;
+      display: flex;
+      flex-direction: row;
+      padding: 10px;
+      margin-bottom:10px;
+    }
+
+    .tech-stack-image img{
+      height: 30px;
+      object-fit: contain;
+    }
+    .search-box{
+      margin-top:10px;
+      margin-bottom:10px;
+    }
+    .tech-stack-name{
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 600;
+      font-size: 14px;
+      line-height: 19px;
+      leading-trim: both;
+      text-edge: cap;
+      color: #344054;
+      align-items: center;
+      display: flex;
+      margin-left: 20px;
+    }
+
+
+
+
+    @media (min-width: 1200px) {
+      .cards {
+        min-width: 215px;
+      }
+      .skill-index-cards{
+        min-width: 100%;
+      }
+    }
+
+    @media (min-width: 576px) {
+      .cards {}
+      .divider{
+        min-height: 5px;
+      }
+    }
+
+</style>
+
+
+  <div class="container-fluid cont-body" id="main" aria-label="Content" tabindex="-1" style="font-family: 'Inter', sans-serif;padding-left: 50px;padding-right: 50px;background: #FFF;"> 
+    <div class="overall row">
+
+        <!-- Overall Cards - assessment - course cards section -->
+        <div class="overall-section col-md-12">
+        
+                <!-- Overall Cards section -->
+                <div class="overall-card row col-md-12 g-1 ">
+                    <!-- Topic card-->
+                    <div class="cards col-md-3" style="border-left:3px solid green; width:350px;">
+                        <div class="card-content">
+                            <div class="card-header"><span class="overall-card-title">Topics</span></div>
+                            <div class="card-scores">
+                              <span class="overall-card-marks">1/<span class="out_of total-mark">${len(course_key_list.split(','))-1}</span> | ${int((1/(len(course_key_list.split(','))-1))*100)}%</span>
+                            </div>
+                        </div>
+                        <div class="card-img">
+                          <img  src="${static.url('images/topics.png')}" class="overall_img"/>
+                        </div>
+                    </div>
+                    <!--Hands On Card-->
+                    <div class="cards col-md-3" style="border-left:3px solid orange; width:350px;">
+                        <div class="card-content">
+                            <div class="card-header"><span class="overall-card-title" >Hands On</span></div>
+                            <div class="card-scores">
+                              <span class="overall-card-marks">19/<span class="out_of total-mark">20</span> | 95% </span>
+                            </div>
+                        </div>
+                        <div class="card-img">
+                          <img  src="${static.url('images/handson.png')}" style="filter: invert(22.9%) brightness(119.8%);width:25px"/>
+                        </div>
+                    </div>
+                    <!-- Assessment Card -->
+                    <div class="cards col-md-3" style="border-left:3px solid red; width:350px;">
+                        <div class="card-content">
+                            <div class="card-header"><span class="overall-card-title">Assessment</span></div>
+                            <div class="card-scores">
+                              <span class="overall-card-marks">1/<span class="out_of total-mark">${len(assessment_key_list.split(','))-1}</span> | ${int((1/(len(assessment_key_list.split(','))-1))*100)  }% </span>
+                            </div>  
+                        </div>
+                        <div class="card-img">
+                          <img  src="${static.url('images/assessment.png')}" class="overall_img"/>
+                        </div>
+                    </div> 
+                    <!-- Presentation card 
+                    <div class="cards col-sm-4" style="border-left:3px solid green">
+                        <div class="card-content">
+                            <div class="card-header"><span class="overall-card-title">Presentation</span></div>
+                            <div class="card-scores">
+                              <span class="overall-card-marks">19/<span class="out_of total-mark">20</span> | 95% </span>
+                            </div>
+                        </div>
+                        <div class="card-img">
+                          <img  src="${static.url('images/presentation.png')}" class="overall_img"/>
+                        </div>
+                    </div> -->
+                </div>
+    
+
+                <div class="dashboard-title" style="padding:10px;"> 
+
+                     
+
+                      <!-- /overall cards section end -->
+                  
+                      <div class="dashboard mx-0 border-2" id="dashboard-main" >
+                  
+                            % if display_dashboard_courses:
+                  
+                              <div class="row">
+                                <div class="col-md-12">
+                                  % if (hasattr(settings,'HIDE_ENROLL_BUTTON') and not settings.HIDE_ENROLL_BUTTON):  
+                                    <div style="float: right;">
+                                      <div class="addAID">
+                                        <span class="enrollemnt-button btn btn-info" title="Enroll into program and course using the Enrollment ID">
+                                          <i class="fa fa-plus" style="font-size:16px"></i>
+                                          &nbsp; Enroll
+                                        </span>
+                                      </div>
+                                    </div>
+                                  % endif
+                                </div>
+                              </div>
+                  
+                              <!-- Assessments -->
+                              <%include file='dashboard/_dashboard_row.html' args='course_entitlements=course_entitlements, course_enrollments=course_enrollments, 
+                              courseKeys=assessment_key_list, listID ="couserlists1", listTitle="My Assessments", NA_Message ="No Assessment details available", entityName="assessment", ENABLE_CARD_VIEW=ENABLE_CARD_VIEW' />
+                              
+                              <!-- Courses -->
+                              <%include file='dashboard/_dashboard_row.html' args='course_entitlements=course_entitlements, course_enrollments=course_enrollments, 
+                              courseKeys=course_key_list, listID ="couserlists2", listTitle="My Courses", NA_Message ="No Course details available", entityName="course", ENABLE_CARD_VIEW=ENABLE_CARD_VIEW' />
+                  
+                  
+                            % else:
+                              <div class="empty-dashboard-message">
+                                % if display_dashboard_courses:
+                                  <p>${_("You are not enrolled in any courses yet.")}</p>
+                                  % if empty_dashboard_message:
+                                    <p class="custom-message">${empty_dashboard_message | n, decode.utf8}</p>
+                                  %endif
+                                  % if settings.FEATURES.get('COURSES_ARE_BROWSABLE'):
+                                    <a class="btn btn-primary" href="${marketing_link('COURSES')}">
+                                      ${_("Explore courses")}
+                                    </a>
+                                  %endif
+                                % else:
+                                <p>${_("Activate your account!")}</p>
+                                <p class="custom-message">${ activate_account_message | n, decode.utf8 }</p>
+                                % endif
+                              </div>
+                            % endif
+                  
+                            % if staff_access and len(errored_courses) > 0:
+                              <div id="course-errors">
+                                <h2>${_("Course-loading errors")}</h2>
+                  
+                                % for course_dir, errors in errored_courses.items():
+                                  <h3>${course_dir}</h3>
+                                      <ul>
+                                    % for (msg, err) in errors:
+                                        <li>${msg}
+                                          <ul><li><pre>${err}</pre></li></ul>
+                                        </li>
+                                    % endfor
+                                      </ul>
+                                % endfor
+                              </div>
+                            % endif
+                        </div>   
+                        
+                    </div>
+          
+        </div>
+      </div>
+        
+    </div>
+          <!--- Grading Sidebar Section 
+          
+          
+          
+        
+      <div class="col-md-3" style="padding:0 !impotant">
+        <div class="grading-section">
+          <span class="sidebar-title">My Grades</span>
+          <div class="grades-card">
+            <div class="tech-grade-card">
+              <div class="band-card-tech col-4" id="band_card">
+                <span class="band-var">C1</h1>
+              </div>
+              <div class="band_details col-8">
+                <span class="band-title">Technical</span>
+                <span class="scores">Score : <span class="band_result" id="band-result">9.20</span></span>
+              </div>
+            </div>
+            <div class="tech-grade-card">
+              <div class="band-card-comm" id="band_card">
+                <span class="band-var">C2</h1>
+              </div>
+              <div class="band_details">
+                <span class="band-title">Communication</span>
+                <span class="scores">Score : <span class="band_result" id="band-result">Above Average</span></span>
+              </div>
+            </div>
+          </div>
+          <div class="divider"></div>
+          <div class="skill-index-section">
+            <span class="sidebar-title">Skill Index</span>
+            <div class="skills-card row row-cols-1 row-cols-md-5 g-3">
+
+                <div class="skill-index-cards col-sm-3" style="border-left:3px solid #FEC84B">
+                  <div class="skill-card-content">
+                      <div class="skill-numerics row">
+                          <div class="marks-skill col-6">
+                            <span class="marks-skill-text">60/<span class="out-of-marks">230</span></span>
+                          </div>
+                          <div class="percentage-skills col-6">
+                            <span class="percentage-skill-text">78%</span>
+                          </div>
+                      </div>
+                      <div class="comments">
+                        <span class="skill-comments">Overall</span>
+                      </div>
+                  </div>
+                </div>
+
+                <div class="skill-index-cards col-sm-3" style="border-left:3px solid #FDA29B">
+                  <div class="skill-card-content">
+                    <div class="skill-numerics row">
+                      <div class="marks-skill col-6">
+                        <span class="marks-skill-text">23/<span class="out-of-marks">80</span></span>
+                      </div>
+                      <div class="percentage-skills col-6">
+                        <span class="percentage-skill-text">18%</span>
+                      </div>
+                  </div>
+                  <div class="comments">
+                    <span class="skill-comments">Must Have</span>
+                  </div>
+                  </div>
+                </div>
+
+                <div class="skill-index-cards col-sm-3" style="border-left:3px solid #039855">
+                  <div class="skill-card-content">
+                    <div class="skill-numerics row">
+                      <div class="marks-skill col-6">
+                        <span class="marks-skill-text">42/<span class="out-of-marks">44</span></span>
+                      </div>
+                      <div class="percentage-skills col-6">
+                        <span class="percentage-skill-text">98%</span>
+                      </div>
+                  </div>
+                  <div class="comments">
+                    <span class="skill-comments">Good to Have</span>
+                  </div>
+                  </div>
+                </div>
+            </div>
+          </div>
+        </div>
+        <div class="grading-section">
+          <span class="sidebar-title">Choose Tech Stack</span>
+          <div class="search-box">
+            <input type="text" class="search-input-field" id="tech-search" placeholder="search" style="width:100%"/>
+          </div>
+          <div class="tech-stack-card">
+            <div class="tech-stack-image">
+              <img src="https://cdn.freebiesupply.com/logos/large/2x/java-14-logo-png-transparent.png"/>
+            </div>
+            <div class="tech-stack-name">
+              <span>Java</span>
+            </div>
+          </div>
+          <div class="tech-stack-card">
+            <div class="tech-stack-image">
+              <img src="https://cdn.freebiesupply.com/logos/large/2x/java-14-logo-png-transparent.png"/>
+            </div>
+            <div class="tech-stack-name">
+              <span>Java</span>
+            </div>
+          </div>
+          <div class="tech-stack-card">
+            <div class="tech-stack-image">
+              <img src="https://cdn.freebiesupply.com/logos/large/2x/java-14-logo-png-transparent.png"/>
+            </div>
+            <div class="tech-stack-name">
+              <span>Java</span>
+            </div>
+          </div>
+        </div>
+    </div>-->
+  </div> 
+    <div class="side-container" role="complementary" aria-label="messages">
+      %if display_sidebar_account_activation_message:
+        <div class="sidebar-notification">
+          <%include file="${static.get_template_path('registration/account_activation_sidebar_notice.html')}" />
+        </div>
+      %endif
+
+
+
+
+
+
+    
+
+
+   
+
+    
+
+
+
+
+
+
+
+%if show_account_activation_popup:
+    <div id="activate-account-modal" class="modal activate-account-modal" aria-hidden="true" tabindex=0 >
+      <div class="inner-wrapper" role="dialog" aria-labelledby="activate-account-modal-title" aria-live="polite">
+          <h3>
+             ${_("Activate your account so you can log back in")}
+            <span class="sr">,
+              ## Translators: this text gives status on if the modal interface (a menu or piece of UI that takes the full focus of the screen) is open or not
+              ${_("window open")}
+            </span>
+        </h3>
+          <p class="activate-account-modal-body">${Text(_("We sent an email to {strong_start}{email}{strong_end} with a link to activate your account. Can’t find it? Check your spam folder or {link_start}resend the email{link_end}.")).format(
+              strong_start=HTML('<strong>'),
+              email=user.email,
+              strong_end=HTML('</strong>'),
+              link_start=HTML('<a href="#" id="send_cta_email" >'),
+              link_end=HTML('</a>')
+              )}
+          </p>
+           <div class="activate-account-modal-button">
+               <button class="btn btn-primary" id="button">
+                   ${Text(_("Continue to {platform_name}")).format(platform_name=settings.PLATFORM_NAME)}
+                   <svg  style="vertical-align:bottom" width="24" height="24" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg"><path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8-8-8z"/></svg>
+               </button>
+           </div>
+
+      </div>
+    </div>
+%endif
+
+<div id="email-settings-modal" class="modal" aria-hidden="true">
+  <div class="inner-wrapper" role="dialog" aria-labelledby="email-settings-title">
+    <button class="close-modal">
+      <span class="icon fa fa-remove" aria-hidden="true"></span>
+      <span class="sr">
+        ## Translators: this is a control to allow users to exit out of this modal interface (a menu or piece of UI that takes the full focus of the screen)
+        ${_("Close")}
+      </span>
+    </button>
+
+    <header>
+      <h2 id="email-settings-title">
+        ${Text(_("Email Settings for {course_number}")).format(course_number=HTML('<span id="email_settings_course_number"></span>'))}
+        <span class="sr">,
+          ## Translators: this text gives status on if the modal interface (a menu or piece of UI that takes the full focus of the screen) is open or not
+          ${_("window open")}
+        </span>
+      </h2>
+      <hr/>
+    </header>
+
+    <form id="email_settings_form" method="post">
+      <input name="course_id" id="email_settings_course_id" type="hidden" />
+      <label><input type="checkbox" id="receive_emails" name="receive_emails" />${_("Receive course emails")} </label>
+      <div class="submit">
+        <input type="submit" id="submit" value="${_("Save Settings")}" />
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="unenroll-modal" class="modal unenroll-modal" aria-hidden="true">
+  <div class="inner-wrapper" role="dialog" aria-labelledby="unenrollment-modal-title" aria-live="polite">
+    <button class="close-modal">
+      <span class="icon fa fa-remove" aria-hidden="true"></span>
+      <span class="sr">
+        ## Translators: this is a control to allow users to exit out of this modal interface (a menu or piece of UI that takes the full focus of the screen)
+        ${_("Close")}
+      </span>
+    </button>
+
+    <header class="unenroll-header">
+      <h2 id="unenrollment-modal-title">
+        <span id='track-info'></span>
+        <span id='refund-info'></span>
+        <span class="sr">,
+          ## Translators: this text gives status on if the modal interface (a menu or piece of UI that takes the full focus of the screen) is open or not
+          ${_("window open")}
+        </span>
+      </h2>
+      <hr/>
+    </header>
+    <div id="unenroll_error" class="modal-form-error"></div>
+    <form id="unenroll_form" method="post" data-remote="true" action="${reverse('change_enrollment')}">
+      <input name="course_id" id="unenroll_course_id" type="hidden" />
+      <input name="enrollment_action" type="hidden" value="unenroll" />
+      <div class="submit">
+        <input class="submit-button" name="submit" type="submit" value="${_("Unenroll")}" />
+      </div>
+    </form>
+  </div>
+</div>
+
+<%include file="dashboard/_dashboard_entitlement_unenrollment_modal.html"/>
